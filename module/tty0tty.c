@@ -623,7 +623,7 @@ static int __init tty0tty_init(void)
 		tty0tty_table[i] = NULL;
 	}
 #ifdef SCULL_DEBUG
-	printk(KERN_DEBUG "%s - \n", __FUNCTION__);
+	printk(KERN_DEBUG "%s - pairs=%d\n", __FUNCTION__, pairs);
 #endif
 	/* allocate the tty driver */
 	tty0tty_tty_driver = alloc_tty_driver(2 * pairs);
