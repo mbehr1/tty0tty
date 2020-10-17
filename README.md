@@ -1,6 +1,5 @@
 
-# tty0tty - linux null modem emulator with fault injection v2.0
-
+# tty0tty - linux null modem emulator with fault injection v2.1
 
 The tty0tty directory tree is divided in:
 
@@ -47,6 +46,10 @@ The tty0tty directory tree is divided in:
 ## Requirements:
 
   For building the module kernel-headers or kernel source are necessary.
+
+  E.g. I have the following packages installed:
+  - build-essential
+  - linux-headers-$(uname -r)
 
 ## Installation:
 
@@ -103,6 +106,8 @@ Note that this method will not make the module persist over kernel updates so if
 
 ## Fault injection
 
+### ber - bit-error-rate
+
 The module offers a parameter **ber** that allows to simulate bit-errors on the write->read path.
 This is useful to e.g. test SW modules that communicate via UART/serial devices where noise/corruption can occur.
 
@@ -123,4 +128,13 @@ sudo bash -c 'echo 1000 > /sys/module/tty0tty/parameters/ber'
 `
 
 Now around 1000 / 2^32 bytes will be randomly corrupted.
+
+### bdr - byte-drop-rate
+
+The module offers a parameter **bdr** that allows to simulate byte drops on the write->read path.
+This is useful to e.g. test SW modules that communicate via UART/serial devices where byte drop can occur.
+
+The **bdr** value determines the amount of byte-drops per 2^32 bytes.
+
+You can set it either as a parameter on loading the module add e.g. `bdr=1000` or change it via proc-fs (similar a ber see above).
 

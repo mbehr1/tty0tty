@@ -1,9 +1,12 @@
 /* ########################################################################
 
-   tty0tty - linux null modem emulator (module)  for kernel > 3.8
+   tty0tty - linux null modem emulator (module) with failure injection
+   for kernel > 3.8
 
    ########################################################################
 
+   Parts copyright (c) : 2020 Matthias Behr
+   based on 
    Copyright (c) : 2013  Luis Claudio Gambôa Lopes
  
     Based in Tiny TTY driver -  Copyright (C) 2002-2004 Greg Kroah-Hartman (greg@kroah.com)
@@ -22,7 +25,6 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
-   For e-mail suggestions :  lcgamboa@yahoo.com
    ######################################################################## */
 
 #include <linux/kernel.h>
@@ -43,7 +45,7 @@
 #endif
 #include <asm/uaccess.h>
 
-#define DRIVER_VERSION "v2.0"
+#define DRIVER_VERSION "v2.1"
 #define DRIVER_AUTHOR                                                          \
 	"Matthias Behr based on work from Luis Claudio Gamboa Lopes <lcgamboa@yahoo.com>"
 #define DRIVER_DESC "tty0tty null modem driver with fault injection feature"
@@ -60,10 +62,17 @@ MODULE_PARM_DESC(pairs,
 
 unsigned long ber = 0;
 module_param(ber, ulong, S_IRUGO | S_IWUSR);
-// readable by all users in sysfs (/sys/module/vspi_drv/parameters/), changeable only by root
+// readable by all users in sysfs (/sys/module/tty0tty/parameters/), changeable only by root
 MODULE_PARM_DESC(
 	ber,
 	"bit error rate for each pair from write to read (amount of corrupt bytes in 2^32)");
+
+unsigned long bdr = 0;
+module_param(bdr, ulong, S_IRUGO | S_IWUSR);
+// readable by all users in sysfs (/sys/module/tty0tty/parameters/), changeable only by root
+MODULE_PARM_DESC(
+	bdr,
+	"byte drop rate for each pair from write to read (amount of dropped bytes in 2^32)");
 
 #if 0
 #define TTY0TTY_MAJOR 240 /* experimental range */
@@ -262,7 +271,31 @@ static int tty0tty_write(struct tty_struct *tty, const unsigned char *buffer,
 		 * (could be improved by e.g. each 256 bytes)
 		 */
 		bool doWrite = true;
-		if (ber > 0 && count > 0) {
+		if (bdr > 0 && count > 0) {
+			u32 random_number[2];
+			u32 bdr_cor = bdr * count;
+			get_random_bytes(random_number, sizeof(random_number));
+			if (random_number[0] <= bdr_cor) {
+				// determine the position to drop
+				size_t pos = random_number[1];
+				pos %= count;
+				printk(KERN_NOTICE
+				       "%s - bdr dropped byte %ld/%d\n",
+				       __FUNCTION__, pos, count);
+				if (pos > 0) { // [0-pos)
+					tty_insert_flip_string(ttyx->port,
+							       buffer, pos);
+				}
+				if ((pos + 1) < count) { // [pos+1, count)
+					tty_insert_flip_string(
+						ttyx->port, buffer + (pos + 1),
+						count - (pos + 1));
+				}
+				doWrite = false;
+			}
+		}
+		// we don't drop and corrupt at same time
+		if (ber > 0 && count > 0 && doWrite) {
 			u32 random_number[3];
 			u32 ber_cor;
 			ber_cor = ber * count;
@@ -672,7 +705,8 @@ static int __init tty0tty_init(void)
 		tty0tty_table[i] = NULL;
 	}
 #ifdef SCULL_DEBUG
-	printk(KERN_DEBUG "%s - pairs=%d, ber=%lu\n", __FUNCTION__, pairs, ber);
+	printk(KERN_DEBUG "%s - pairs=%d, ber=%lu bdr=%lu\n", __FUNCTION__,
+	       pairs, ber, bdr);
 #endif
 	/* allocate the tty driver */
 	tty0tty_tty_driver = alloc_tty_driver(2 * pairs);
