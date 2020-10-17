@@ -1,5 +1,5 @@
 
-# tty0tty - linux null modem emulator v1.2 
+# tty0tty - linux null modem emulator with fault injection v2.0
 
 
 The tty0tty directory tree is divided in:
@@ -23,7 +23,7 @@ The tty0tty directory tree is divided in:
 
 ## Module:
 
- The module is tested in kernel 3.10.2 (debian) 
+ The module is tested with kernel 5.4.0 (Ubuntu 20.04 LTS)
 
   When loaded, create 8 ttys interconnected:
   
@@ -51,22 +51,16 @@ The tty0tty directory tree is divided in:
 ## Installation:
 
 Download the tty0tty package from one of these sources:
-Clone the repo https://github.com/freemed/tty0tty
+Clone the repo https://github.com/mbehr1/tty0tty
 
 ```
-git clone https://github.com/freemed/tty0tty
+git clone https://github.com/mbehr1/tty0tty
 ```
 
-Extract it
+Build the kernel module:
 
 ```
-tar xf tty0tty-1.2.tgz
-```
-
-Build the kernel module from provided source
-
-```
-cd tty0tty-1.2/module
+cd tty0tty/module
 make
 ```
 
@@ -107,15 +101,26 @@ tty0tty
 
 Note that this method will not make the module persist over kernel updates so if you ever update your kernel, make sure you build tty0tty again repeat the process.
 
-## Debian package
+## Fault injection
 
-In order to build the dkms Debian package
+The module offers a parameter **ber** that allows to simulate bit-errors on the write->read path.
+This is useful to e.g. test SW modules that communicate via UART/serial devices where noise/corruption can occur.
 
-```
-sudo apt-get update && sudo apt-get install -y dh-make dkms build-essential
-debuild -uc -us
-```
+The **ber** value determines the amount of bit-error-rate per 2^32 bytes.
 
-## Contact
+You can set it either as a parameter on loading the module add e.g. `ber=1000` or change it via proc-fs:
 
-For e-mail suggestions :  lcgamboa@yahoo.com
+to read current **ber** value:
+
+`
+sudo cat /sys/module/tty0tty/parameters/ber
+`
+
+to change it:
+
+`
+sudo bash -c 'echo 1000 > /sys/module/tty0tty/parameters/ber'
+`
+
+Now around 1000 / 2^32 bytes will be randomly corrupted.
+

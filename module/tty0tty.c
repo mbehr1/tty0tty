@@ -31,6 +31,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/wait.h>
+#include <linux/random.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
@@ -42,9 +43,10 @@
 #endif
 #include <asm/uaccess.h>
 
-#define DRIVER_VERSION "v1.2"
-#define DRIVER_AUTHOR "Luis Claudio Gamboa Lopes <lcgamboa@yahoo.com>"
-#define DRIVER_DESC "tty0tty null modem driver"
+#define DRIVER_VERSION "v2.0"
+#define DRIVER_AUTHOR                                                          \
+	"Matthias Behr based on work from Luis Claudio Gamboa Lopes <lcgamboa@yahoo.com>"
+#define DRIVER_DESC "tty0tty null modem driver with fault injection feature"
 
 /* Module information */
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -55,6 +57,13 @@ short pairs = 4; //Default number of pairs of devices
 module_param(pairs, short, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 MODULE_PARM_DESC(pairs,
 		 "Number of pairs of devices to be created, maximum of 128");
+
+unsigned long ber = 0;
+module_param(ber, ulong, S_IRUGO | S_IWUSR);
+// readable by all users in sysfs (/sys/module/vspi_drv/parameters/), changeable only by root
+MODULE_PARM_DESC(
+	ber,
+	"bit error rate for each pair from write to read (amount of corrupt bytes in 2^32)");
 
 #if 0
 #define TTY0TTY_MAJOR 240 /* experimental range */
@@ -215,6 +224,10 @@ static int tty0tty_write(struct tty_struct *tty, const unsigned char *buffer,
 	int retval = -EINVAL;
 	struct tty_struct *ttyx = NULL;
 
+#ifdef SCULL_DEBUG
+	printk(KERN_DEBUG "%s - count=%d\n", __FUNCTION__, count);
+#endif
+
 	if (!tty0tty)
 		return -ENODEV;
 
@@ -241,13 +254,50 @@ static int tty0tty_write(struct tty_struct *tty, const unsigned char *buffer,
 	//        tty->low_latency=1;
 
 	if (ttyx != NULL) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0)
-		tty_insert_flip_string(ttyx->port, buffer, count);
+		/* add bit error rate before copying to user space as a simulation
+		 * of line/reception noise.
+		 * ber is expressed as number of corrupt bytes in 2^32
+		 * we do the following approach: (targetting low bit error rates)
+		 * for each transfer we change at max. 1 byte by random
+		 * (could be improved by e.g. each 256 bytes)
+		 */
+		bool doWrite = true;
+		if (ber > 0 && count > 0) {
+			u32 random_number[3];
+			u32 ber_cor;
+			ber_cor = ber * count;
+			get_random_bytes(random_number, sizeof(random_number));
+			if (random_number[0] <= ber_cor) {
+				// determine the position to corrupt
+				size_t pos = random_number[1];
+				unsigned char val = random_number[2] & 0xff;
+				// todo we could as well determine just a single bit and flip that
+				// would match better to a "bit-error-rate" (now it's more a byte-error rate)
+				pos %= count;
+
+				printk(KERN_NOTICE
+				       "%s - ber changed byte %ld/%d from %d to %d\n",
+				       __FUNCTION__, pos, count, buffer[pos],
+				       val);
+				// as the buffer is read only we add as 3 sep. copies:
+				if (pos > 0) { // [0-pos)
+					tty_insert_flip_string(ttyx->port,
+							       buffer, pos);
+				}
+				// [pos]
+				tty_insert_flip_string(ttyx->port, &val, 1);
+				if ((pos + 1) < count) { // [pos+1, count)
+					tty_insert_flip_string(
+						ttyx->port, buffer + (pos + 1),
+						count - (pos + 1));
+				}
+				doWrite = false;
+			}
+		}
+		if (doWrite) {
+			tty_insert_flip_string(ttyx->port, buffer, count);
+		}
 		tty_flip_buffer_push(ttyx->port);
-#else
-		tty_insert_flip_string(ttyx, buffer, count);
-		tty_flip_buffer_push(ttyx);
-#endif
 		retval = count;
 	}
 
@@ -579,9 +629,6 @@ static int tty0tty_ioctl_tiocgicount(struct tty_struct *tty, unsigned int cmd,
 static int tty0tty_ioctl(struct tty_struct *tty, unsigned int cmd,
 			 unsigned long arg)
 {
-#ifdef SCULL_DEBUG
-	printk(KERN_DEBUG "%s - %04X \n", __FUNCTION__, cmd);
-#endif
 	switch (cmd) {
 	case TIOCGSERIAL:
 		return tty0tty_ioctl_tiocgserial(tty, cmd, arg);
@@ -590,7 +637,9 @@ static int tty0tty_ioctl(struct tty_struct *tty, unsigned int cmd,
 	case TIOCGICOUNT:
 		return tty0tty_ioctl_tiocgicount(tty, cmd, arg);
 	}
-
+#ifdef SCULL_DEBUG
+	printk(KERN_DEBUG "%s - ioctl %04X not implemented", __FUNCTION__, cmd);
+#endif
 	return -ENOIOCTLCMD;
 }
 
@@ -623,7 +672,7 @@ static int __init tty0tty_init(void)
 		tty0tty_table[i] = NULL;
 	}
 #ifdef SCULL_DEBUG
-	printk(KERN_DEBUG "%s - pairs=%d\n", __FUNCTION__, pairs);
+	printk(KERN_DEBUG "%s - pairs=%d, ber=%lu\n", __FUNCTION__, pairs, ber);
 #endif
 	/* allocate the tty driver */
 	tty0tty_tty_driver = alloc_tty_driver(2 * pairs);
