@@ -676,6 +676,27 @@ static int tty0tty_ioctl(struct tty_struct *tty, unsigned int cmd,
 	return -ENOIOCTLCMD;
 }
 
+static void tty0tty_throttle(struct tty_struct *tty)
+{
+    printk(KERN_NOTICE "%s called, tty buffer(s) overflowing?", __FUNCTION__);
+}
+
+static void tty0tty_unthrottle(struct tty_struct *tty)
+{
+    printk(KERN_NOTICE "%s called, tty buffer(s) emptied, should be good to continue", __FUNCTION__);
+}
+
+static void tty0tty_start(struct tty_struct *tty)
+{
+
+    printk(KERN_NOTICE "%s called, tty buffer(s) emptying, null-modem NOOP", __FUNCTION__);
+}
+
+static void tty0tty_stop(struct tty_struct *tty)
+{
+    printk(KERN_NOTICE "%s called, tty buffer(s) filling up, null-modem NOOP?", __FUNCTION__);
+}
+
 static struct tty_operations serial_ops = {
 	.open = tty0tty_open,
 	.close = tty0tty_close,
@@ -685,6 +706,10 @@ static struct tty_operations serial_ops = {
 	.tiocmget = tty0tty_tiocmget,
 	.tiocmset = tty0tty_tiocmset,
 	.ioctl = tty0tty_ioctl,
+    .throttle = tty0tty_throttle,
+    .unthrottle = tty0tty_unthrottle,
+    .stop = tty0tty_stop,
+    .start = tty0tty_start,
 };
 
 static struct tty_driver *tty0tty_tty_driver;
